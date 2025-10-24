@@ -1,0 +1,21 @@
+{
+  "name": "torrent-scraper-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for scraping torrent metadata",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "jest"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240806.0",
+    "wrangler": "^3.60.3",
+    "jest": "^29.7.0"
+  },
+  "author": "Torrent Streamer Team",
+  "license": "MIT"
+}
