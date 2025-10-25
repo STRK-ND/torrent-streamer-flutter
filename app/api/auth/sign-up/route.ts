@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '@/db';
-import { user, account } from '@/db';
-import { eq } from 'drizzle-orm';
+import { getR1Client, getTorrentCacheManager } from '@/lib/db';
 import { auth } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 
@@ -18,14 +16,29 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { email, password, name } = signUpSchema.parse(body);
 
-    // Check if user already exists
-    const existingUser = await db
-      .select()
-      .from(user)
-      .where(eq(user.email, email))
-      .limit(1);
+    const db = getR1Client();
+    const cacheManager = getTorrentCacheManager();
 
-    if (existingUser.length > 0) {
+    // Check if user already exists (first try cache)
+    const cachedUser = await cacheManager.getUser(email);
+    if (cachedUser) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'USER_ALREADY_EXISTS',
+            message: 'A user with this email already exists',
+          },
+        },
+        { status: 409 }
+      );
+    }
+
+    // Check in database
+    const existingUser = await db.findUserByEmail(email);
+    if (existingUser) {
+      // Cache the user to prevent future database hits
+      await cacheManager.cacheUser(existingUser.id, existingUser);
       return NextResponse.json(
         {
           success: false,
@@ -41,7 +54,7 @@ export async function POST(request: NextRequest) {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create user using better-auth
+    // Create user using better-auth (this will use our R1 adapter)
     const newUser = await auth.api.signUpEmail({
       body: {
         email,
@@ -62,6 +75,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Cache the new user for faster access
+    await cacheManager.cacheUser(newUser.user.id, newUser.user);
 
     // Create session
     const session = await auth.api.session({
@@ -84,8 +100,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate token
+    // Cache the session in KV for faster access
     const token = session.token || session.id;
+    if (token) {
+      await cacheManager.cacheUserSession(token, {
+        userId: newUser.user.id,
+        email: newUser.user.email,
+        expiresAt: session.expiresAt,
+      });
+    }
 
     return NextResponse.json({
       success: true,

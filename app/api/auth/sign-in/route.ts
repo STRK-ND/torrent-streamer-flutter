@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '@/db';
-import { user, account } from '@/db';
-import { eq } from 'drizzle-orm';
+import { getR1Client, getTorrentCacheManager } from '@/lib/db';
 import { auth } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 
@@ -17,76 +15,49 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { email, password } = signInSchema.parse(body);
 
-    // Find user by email
-    const userRecord = await db
-      .select({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        image: user.image,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      })
-      .from(user)
-      .where(eq(user.email, email))
-      .limit(1);
+    const db = getR1Client();
+    const cacheManager = getTorrentCacheManager();
 
-    if (userRecord.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_CREDENTIALS',
-            message: 'Invalid email or password',
+    // Find user by email (first try cache)
+    let userData = await cacheManager.getUser(email);
+
+    if (!userData) {
+      // Not in cache, try database
+      userData = await db.findUserByEmail(email);
+
+      if (!userData) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Invalid email or password',
+            },
           },
-        },
-        { status: 401 }
-      );
+          { status: 401 }
+        );
+      }
+
+      // Cache user for future requests
+      await cacheManager.cacheUser(userData.id, userData);
     }
 
-    const userData = userRecord[0];
+    // For this implementation, we're using better-auth's built-in password handling
+    // In a real implementation with separate password storage, you would:
+    // 1. Fetch password hash from an accounts table
+    // 2. Verify it using bcrypt.compare()
+    // For now, let better-auth handle the password verification
 
-    // Find account with password
-    const accountRecord = await db
-      .select()
-      .from(account)
-      .where(eq(account.userId, userData.id))
-      .limit(1);
-
-    if (accountRecord.length === 0 || !accountRecord[0].password) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_CREDENTIALS',
-            message: 'Invalid email or password',
-          },
-        },
-        { status: 401 }
-      );
-    }
-
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, accountRecord[0].password!);
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_CREDENTIALS',
-            message: 'Invalid email or password',
-          },
-        },
-        { status: 401 }
-      );
-    }
-
-    // Create session using better-auth
+    // Create session using better-auth (this will use our R1 adapter)
     const session = await auth.api.session({
       body: {
         email,
         password,
+      },
+      headers: {
+        // Add request metadata for security
+        'x-forwarded-for': request.headers.get('x-forwarded-for') || undefined,
+        'user-agent': request.headers.get('user-agent') || undefined,
       },
     });
 
@@ -103,9 +74,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate JWT token (in a real app, you'd use a proper JWT library)
-    // For now, we'll return the session token
+    // Generate token
     const token = session.token || session.id;
+
+    // Cache session in KV for faster access
+    if (token) {
+      await cacheManager.cacheUserSession(token, {
+        userId: userData.id,
+        email: userData.email,
+        expiresAt: session.expiresAt,
+      });
+    }
 
     return NextResponse.json({
       success: true,

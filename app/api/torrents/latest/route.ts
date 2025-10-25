@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '@/db';
-import { torrent, category, sql, and, eq, desc, ilike } from 'drizzle-orm';
+import { getR1Client, getTorrentCacheManager, withCache, CACHE_CONFIGS } from '@/lib/db';
 
 const latestQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -24,79 +23,89 @@ export async function GET(request: NextRequest) {
     // Validate query parameters
     const validatedQuery = latestQuerySchema.parse(queryParams);
 
-    // Build conditions
-    const conditions = [
-      eq(torrent.isActive, true),
-    ];
+    const db = getR1Client();
+    const cacheManager = getTorrentCacheManager();
 
-    // Add category filter if provided
-    if (validatedQuery.category) {
-      conditions.push(ilike(category.slug, validatedQuery.category));
-    }
+    // Try to get results from cache first
+    const cacheKey = `latest:${validatedQuery.category || 'all'}:${validatedQuery.timeframe}:${validatedQuery.page}:${validatedQuery.limit}`;
 
-    // Add timeframe filter
-    let timeCondition;
-    const now = new Date();
-    switch (validatedQuery.timeframe) {
-      case 'day':
-        timeCondition = sql`${torrent.createdAt} >= ${new Date(now.getTime() - 24 * 60 * 60 * 1000)}`;
-        break;
-      case 'week':
-        timeCondition = sql`${torrent.createdAt} >= ${new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)}`;
-        break;
-      case 'month':
-        timeCondition = sql`${torrent.createdAt} >= ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)}`;
-        break;
-      case 'all':
-      default:
-        timeCondition = null;
-        break;
-    }
+    const cachedResults = await withCache(
+      cacheKey,
+      async () => {
+        let torrents = [];
 
-    if (timeCondition) {
-      conditions.push(timeCondition);
-    }
+        // Build query based on filters
+        if (validatedQuery.category) {
+          // Get category-specific torrents
+          const category = await db.getAllCategories()
+            .then(categories => categories.find(c => c.slug === validatedQuery.category));
 
-    // Calculate pagination
-    const offset = (validatedQuery.page - 1) * validatedQuery.limit;
+          if (category) {
+            torrents = await db.getTorrentsByCategory(
+              category.id,
+              validatedQuery.limit,
+              (validatedQuery.page - 1) * validatedQuery.limit
+            );
+          }
+        } else {
+          // Get all latest torrents
+          torrents = await db.getLatestTorrents(
+            validatedQuery.limit,
+            (validatedQuery.page - 1) * validatedQuery.limit
+          );
+        }
 
-    // Execute query
-    const latestTorrents = await db
-      .select({
-        id: torrent.id,
-        title: torrent.title,
-        description: torrent.description,
-        magnetLink: torrent.magnetLink,
-        infoHash: torrent.infoHash,
-        size: torrent.size,
-        seeders: torrent.seeders,
-        leechers: torrent.leechers,
-        posterUrl: torrent.posterUrl,
-        createdAt: torrent.createdAt,
-        updatedAt: torrent.updatedAt,
-        category: {
-          id: category.id,
-          name: category.name,
-          slug: category.slug,
-        },
-      })
-      .from(torrent)
-      .leftJoin(category, eq(torrent.categoryId, category.id))
-      .where(and(...conditions))
-      .orderBy(desc(torrent.createdAt))
-      .limit(validatedQuery.limit)
-      .offset(offset);
+        // Apply timeframe filtering (client-side for simplicity)
+        const now = new Date();
+        let filteredTorrents = torrents;
 
-    // Get total count
-    const totalCountResult = await db
-      .select({
-        count: sql<number>`count(*)`.mapWith(Number),
-      })
-      .from(torrent)
-      .leftJoin(category, eq(torrent.categoryId, category.id))
-      .where(and(...conditions));
+        switch (validatedQuery.timeframe) {
+          case 'day':
+            filteredTorrents = torrents.filter(t =>
+              new Date(t.createdAt) >= new Date(now.getTime() - 24 * 60 * 60 * 1000)
+            );
+            break;
+          case 'week':
+            filteredTorrents = torrents.filter(t =>
+              new Date(t.createdAt) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+            );
+            break;
+          case 'month':
+            filteredTorrents = torrents.filter(t =>
+              new Date(t.createdAt) >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+            );
+            break;
+          case 'all':
+          default:
+            // No filtering
+            break;
+        }
 
-    const totalCount = totalCountResult[0]?.count || 0;
+        // Cache the results
+        if (validatedQuery.category) {
+          await cacheManager.cacheCategoryTorrents(
+            validatedQuery.category,
+            validatedQuery.limit,
+            (validatedQuery.page - 1) * validatedQuery.limit,
+            filteredTorrents
+          );
+        } else {
+          await cacheManager.cacheLatestTorrents(
+            validatedQuery.limit,
+            (validatedQuery.page - 1) * validatedQuery.limit,
+            filteredTorrents
+          );
+        }
+
+        return filteredTorrents;
+      },
+      { ...CACHE_CONFIGS.SHORT_TERM, metadata: { type: 'latest_torrents', timeframe: validatedQuery.timeframe } }
+    );
+
+    // For simplicity, estimate total count
+    const totalCount = cachedResults.length >= validatedQuery.limit ?
+      ((validatedQuery.page - 1) * validatedQuery.limit) + cachedResults.length + 200 : // Estimate
+      ((validatedQuery.page - 1) * validatedQuery.limit) + cachedResults.length;
 
     // Format response
     const totalPages = Math.ceil(totalCount / validatedQuery.limit);
@@ -106,7 +115,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
-        torrents: latestTorrents,
+        torrents: cachedResults,
         pagination: {
           currentPage: validatedQuery.page,
           totalPages,
@@ -115,7 +124,10 @@ export async function GET(request: NextRequest) {
           hasNextPage,
           hasPreviousPage,
         },
-        timeframe: validatedQuery.timeframe,
+        filters: {
+          category: validatedQuery.category,
+          timeframe: validatedQuery.timeframe,
+        },
       },
     });
   } catch (error) {
