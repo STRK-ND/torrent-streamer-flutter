@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { user } from '@/db';
-import { eq } from 'drizzle-orm';
+import { getR1Client, getTorrentCacheManager } from '@/lib/db';
 import { auth } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -22,56 +20,88 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
+    const cacheManager = getTorrentCacheManager();
 
-    // Verify session using better-auth
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
+    // First try to get session from cache
+    const cachedSession = await cacheManager.getUserSession(token);
 
-    if (!session || !session.user) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_TOKEN',
-            message: 'Invalid or expired token',
+    if (!cachedSession) {
+      // Not in cache, try better-auth session validation
+      const session = await auth.api.getSession({
+        headers: request.headers,
+      });
+
+      if (!session || !session.user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'INVALID_TOKEN',
+              message: 'Invalid or expired token',
+            },
           },
-        },
-        { status: 401 }
-      );
+          { status: 401 }
+        );
+      }
+
+      // Cache the session for future requests
+      const newToken = session.token || session.id;
+      if (newToken) {
+        await cacheManager.cacheUserSession(newToken, {
+          userId: session.user.id,
+          email: session.user.email,
+          expiresAt: session.expiresAt,
+        });
+      }
     }
 
-    // Get fresh user data from database
-    const userData = await db
-      .select({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        image: user.image,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      })
-      .from(user)
-      .where(eq(user.id, session.user.id))
-      .limit(1);
+    // Get fresh user data (first try cache)
+    let userData = await cacheManager.getUser(cachedSession?.userId || '');
 
-    if (userData.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'USER_NOT_FOUND',
-            message: 'User not found',
+    if (!userData) {
+      // Not in cache, get from database
+      const db = getR1Client();
+
+      // Extract user ID from session - in real implementation, this would come from better-auth
+      const session = await auth.api.getSession({
+        headers: request.headers,
+      });
+
+      if (!session || !session.user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'INVALID_TOKEN',
+              message: 'Invalid or expired token',
+            },
           },
-        },
-        { status: 404 }
-      );
+          { status: 401 }
+        );
+      }
+
+      userData = await db.findUserById(session.user.id);
+
+      if (!userData) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'USER_NOT_FOUND',
+              message: 'User not found',
+            },
+          },
+          { status: 404 }
+        );
+      }
+
+      // Cache user data for future requests
+      await cacheManager.cacheUser(userData.id, userData);
     }
 
     return NextResponse.json({
       success: true,
-      data: userData[0],
+      data: userData,
     });
   } catch (error) {
     console.error('Get user error:', error);
@@ -105,6 +135,8 @@ export async function PUT(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const token = authHeader.substring(7);
 
     // Verify session using better-auth
     const session = await auth.api.getSession({
@@ -150,7 +182,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Update user data using better-auth
+    // Update user data using better-auth (this will use our R1 adapter)
     const updatedUser = await auth.api.updateUser({
       body: updateData,
     });
@@ -167,6 +199,10 @@ export async function PUT(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Invalidate cache for this user so fresh data is loaded next time
+    const cacheManager = getTorrentCacheManager();
+    await cacheManager.invalidateUserCache(session.user.id, session.user.email);
 
     return NextResponse.json({
       success: true,
