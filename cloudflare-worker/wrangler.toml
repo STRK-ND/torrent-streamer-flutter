@@ -1,0 +1,16 @@
+name = "torrent-scraper-worker"
+main = "src/index.js"
+compatibility_date = "2024-08-01"
+
+[vars]
+# Environment variables
+INGEST_API_KEY = "your_ingest_api_key_here"
+BACKEND_URL = "https://your-backend-url.com/api"
+
+# Cron trigger for scheduled scraping
+[[triggers]]
+crons = ["0 */6 * * *"]  # Every 6 hours
+
+[env.production.vars]
+INGEST_API_KEY = "your_production_ingest_api_key"
+BACKEND_URL = "https://your-production-backend.com/api"

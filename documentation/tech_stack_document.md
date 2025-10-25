@@ -1,90 +1,119 @@
 # Tech Stack Document
 
-This document explains the key technologies chosen for the **codeguide-starter** project. It’s written in everyday language so anyone—technical or not—can understand why each tool was picked and how it supports the application.
+This document explains the technology choices behind the `torrent-streamer-flutter` backend service and web admin panel in clear, everyday language. It shows how each tool fits together to power your Flutter-based torrent streaming app.
 
 ## 1. Frontend Technologies
-The frontend is everything the user sees and interacts with. For this project, we’ve used:
 
-- **Next.js (App Router)**
-  - A React framework that makes page routing, server-side rendering, and API routes very simple.
-  - Enhances user experience by pre-rendering pages on the server or at build time, leading to faster initial load.
-- **React 18**
-  - The underlying library for building user interfaces with reusable components.
-  - Provides a smooth, interactive experience thanks to its virtual DOM and modern hooks.
-- **TypeScript**
-  - A superset of JavaScript that adds types (labels for data).
-  - Helps catch errors early during development and makes the code easier to maintain.
-- **CSS (globals.css & theme.css)**
-  - **globals.css** applies base styles (fonts, colors, resets) across the entire app.
-  - **dashboard/theme.css** defines the look and feel specific to the dashboard area.
-  - This separation keeps styles organized and avoids accidental style conflicts.
+Although the main focus is the backend API, this project includes an optional web interface (admin panel or browser-based client) built with modern frontend tools:
 
-By combining these tools, we have a clear structure (Next.js folders for pages and layouts), safer code (TypeScript), and flexible styling with vanilla CSS.
+- **Next.js 15 (App Router)**
+  - Provides the foundation for both server-rendered pages and API routes.
+  - Lets us mix React components with backend logic in the same project.
+- **React**
+  - A popular JavaScript library for building user interfaces.
+  - Powers the interactive parts of the admin dashboard.
+- **Tailwind CSS**
+  - A utility-first styling framework that speeds up design.
+  - Makes it easy to create a consistent look without writing custom CSS from scratch.
+- **shadcn/ui**
+  - A collection of pre-built React components styled with Tailwind.
+  - Helps us assemble common UI elements (buttons, forms, dialogs) quickly.
+
+These tools combine to give administrators or browser-based users a clean, responsive interface for managing users, content, and system settings.
 
 ## 2. Backend Technologies
-The backend handles data, user accounts, and the logic behind the scenes. Our choices here are:
 
+The heart of this project is a production-ready server that exposes REST APIs for your Flutter client. Key choices include:
+
+- **TypeScript**
+  - A superset of JavaScript that adds types.
+  - Catches many errors during development and creates a clear contract between server and client.
 - **Next.js API Routes**
-  - Allows us to write server-side code (`route.ts` files) alongside our frontend in the same project.
-  - Runs on Node.js, so we can handle requests like sign-up, sign-in, and data fetching in one place.
-- **Node.js Runtime**
-  - The JavaScript environment on the server that executes our API routes.
-- **bcrypt** (npm package)
-  - A library for hashing passwords securely before storing them.
-  - Ensures that even if someone got access to our data, raw passwords aren’t visible.
-- **(Optional) NextAuth.js or JWT**
-  - While this starter kit shows a custom authentication flow, it can easily integrate services like NextAuth.js for email-based login or JWT (JSON Web Tokens) for stateless sessions.
+  - Lets us define HTTP endpoints under `app/api/` for tasks like login, searching torrents, and fetching details.
+  - Automatically handles routing and integrates with serverless deployments.
+- **better-auth**
+  - A library we use as the basis for user sign-up/sign-in flows.
+  - Extended to issue JSON Web Tokens (JWT), which your Flutter app will store and send with each request.
+- **JSON Web Tokens (JWT)**
+  - A stateless, compact way to authenticate API requests.
+  - Ensures that only authorized users can access protected endpoints.
+- **PostgreSQL**
+  - A reliable, open-source relational database.
+  - Stores user profiles, torrent metadata, watch history, and preferences.
+- **Drizzle ORM**
+  - A TypeScript-friendly tool for defining database schemas and running queries.
+  - Ensures type-safe interactions with PostgreSQL.
+- **Zod**
+  - A schema validation library.
+  - Validates incoming API data to prevent bad or malicious requests.
 
-These components work together to receive user credentials, verify or store them securely, manage sessions or tokens, and deliver protected data back to the frontend.
+Together, these components form a robust, type-safe backend that your Flutter app can rely on for user management and data retrieval.
 
 ## 3. Infrastructure and Deployment
-Infrastructure covers where and how we host the app, as well as how changes get delivered:
 
+To keep development smooth and deployments reliable, we’ve chosen infrastructure and tooling that promote consistency and scalability:
+
+- **Docker**
+  - Defines the development environment (Node.js, PostgreSQL) in code.
+  - Guarantees that "it works on my machine" issues are minimized.
+- **Vercel**
+  - A platform for deploying Next.js applications with zero configuration.
+  - Automatically scales serverless functions in response to traffic.
+  - Offers built-in environment variable management.
 - **Git & GitHub**
-  - Version control system (Git) and remote hosting (GitHub) keep track of all code changes and allow team collaboration.
-- **Vercel (or Netlify)**
-  - A popular hosting service optimized for Next.js, with one-click deployments and global content delivery.
-  - Automatically rebuilds and deploys the site whenever code is pushed to the main branch.
-- **GitHub Actions (CI/CD)**
-  - Automates tasks like linting (ESLint), formatting (Prettier), and running any tests you add.
-  - Ensures that only clean, tested code goes live.
+  - Version control system (Git) and a hosted repository (GitHub).
+  - Manages code history, pull requests, and collaboration.
+- **CI/CD**
+  - Vercel’s deployment pipeline tests and publishes changes on push.
+  - (Optional) GitHub Actions can run additional checks (linting, tests) before deploying.
 
-Together, these tools provide a reliable, scalable setup where every code change is tested and deployed quickly, with minimal manual work.
+These choices ensure that your backend can grow with your user base and that new code can safely make its way into production.
 
 ## 4. Third-Party Integrations
-While this starter kit is minimal by design, it already includes or can easily add:
 
-- **bcrypt**
-  - For secure password hashing (included as an npm dependency).
-- **NextAuth.js** (optional)
-  - A full-featured authentication library supporting email/password, OAuth, and more.
-- **Sentry or LogRocket** (optional)
-  - For real-time error tracking and performance monitoring in production.
+We integrate with external services to handle specialized tasks and offload work from our core server:
 
-These integrations help extend the app’s capabilities without building every feature from scratch.
+- **Cloudflare Workers**
+  - Runs your torrent-scraping logic at the edge.
+  - Sends scraped metadata to a secured API endpoint (`/api/ingest`) in our Next.js app.
+- **Vercel Cron Jobs** (or **Inngest**)
+  - Schedules periodic tasks, such as triggering scrapes or cleaning up old data.
+- **Environment Variables (.env)**
+  - Securely stores secrets (database URL, JWT secret, API keys).
+  - Keeps sensitive information out of the codebase.
+
+These integrations let us scale scraping, scheduling, and secret management without complicating the core application.
 
 ## 5. Security and Performance Considerations
-We’ve baked in several measures to keep users safe and the app running smoothly:
 
-Security:
-- Passwords are never stored in plain text—bcrypt hashes them with a random salt.
-- API routes can implement CSRF protection and input validation to block malicious requests.
-- Session tokens or cookies are marked secure and HttpOnly to prevent theft via JavaScript.
+We’ve built in measures to keep data safe and the app responsive:
 
-Performance:
-- Server-side rendering (SSR) and static site generation (SSG) in Next.js deliver pages faster.
-- Code splitting and lazy-loaded components ensure users only download what they need.
-- Global CSS and theme files are small and cached by the browser for quick repeat visits.
+- **Authentication & Authorization**
+  - JWT-based tokens ensure each request comes from a verified user.
+  - Middleware checks tokens on every protected route.
+- **Input Validation**
+  - Zod schemas validate all incoming requests to prevent malformed data and attacks.
+- **Secure Configuration**
+  - Environment variables and Docker secrets keep credentials out of source code.
+  - HTTPS is enforced by default on Vercel.
+- **Type Safety**
+  - TypeScript and Drizzle ORM catch mismatches between code and database early.
+- **Performance Optimizations**
+  - Serverless functions auto-scale on Vercel, so spikes in traffic are handled gracefully.
+  - Database indexes (to be added on key columns) speed up search queries.
 
-These strategies work together to give users a fast, secure experience every time.
+These practices protect user data, prevent common vulnerabilities, and keep response times low.
 
 ## 6. Conclusion and Overall Tech Stack Summary
-In building **codeguide-starter**, we chose technologies that:
 
-- Align with modern web standards (Next.js, React, TypeScript).
-- Provide a clear, file-based project structure for rapid onboarding.
-- Offer built-in support for server-side rendering, API routes, and static assets.
-- Emphasize security through password hashing, session management, and safe defaults.
-- Enable easy scaling and future enhancements via modular code and optional integrations.
+By combining a Next.js 15 backend with TypeScript, Drizzle ORM, and PostgreSQL, we have a solid, type-safe foundation for your torrent streaming service. Frontend technologies like React, Tailwind CSS, and shadcn/ui power an optional admin dashboard. Docker and Vercel streamline development and deployment, while Cloudflare Workers and scheduled jobs handle scraping and background tasks.
 
-This stack strikes a balance between simplicity for newcomers and flexibility for experienced teams. It accelerates development of a secure authentication flow and a polished dashboard, while leaving room to plug in databases, test suites, and advanced features as the project grows.
+This tech stack aligns perfectly with your goals:
+
+- **Scalable API-first design** for your Flutter client.
+- **Robust user authentication** with JWT.
+- **Type-safe data layer** from Drizzle and TypeScript.
+- **Easy deployments and scaling** via Vercel and Docker.
+- **Modular integrations** for scraping, scheduling, and environment management.
+
+By building on this opinionated starter template, you accelerate development and focus on the unique streaming experience in your Flutter app.

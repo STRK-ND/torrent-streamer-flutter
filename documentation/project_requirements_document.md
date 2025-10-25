@@ -1,117 +1,113 @@
-# Project Requirements Document: codeguide-starter
-
----
+# Project Requirements Document (PRD)
 
 ## 1. Project Overview
+This project delivers a production-ready backend service and optional web admin panel to power a Flutter-based torrent streaming application. Instead of building server and database layers from scratch, you’ll start with a Next.js 15 (App Router) template that already has user authentication, a PostgreSQL database (via Drizzle ORM), a set of REST API routes, and a React/Tailwind CSS admin interface out of the box.
 
-The **codeguide-starter** project is a boilerplate web application that provides a ready-made foundation for any web project requiring secure user authentication and a post-login dashboard. It sets up the common building blocks—sign-up and sign-in pages, API routes to handle registration and login, and a simple dashboard interface driven by static data. By delivering this skeleton, it accelerates development time and ensures best practices are in place from day one.
+The core problem this solves is accelerating development of a scalable, secure backend for your mobile streaming client. The key objectives are:
+- Provide stateless, token-based authentication so Flutter clients can sign up and sign in.
+- Expose a clear, type-safe HTTP API for searching, listing, and retrieving torrent metadata.
+- Offer an admin dashboard for human operators to manage users and content.
+- Ensure seamless deployment and consistent environments via Docker and Vercel.
 
-This starter kit is being built to solve the friction developers face when setting up repeated common tasks: credential handling, session management, page routing, and theming. Key objectives include: 1) delivering a fully working authentication flow (registration & login), 2) providing a gated dashboard area upon successful login, 3) establishing a clear, maintainable project structure using Next.js and TypeScript, and 4) demonstrating a clean theming approach with global and section-specific CSS. Success is measured by having an end-to-end login journey in under 200 lines of code and zero runtime type errors.
-
----
+Success will be measured by the ability of the Flutter app to integrate with all APIs without modifications, as well as by stable performance under expected load and straightforward administrator workflows.
 
 ## 2. In-Scope vs. Out-of-Scope
 
 ### In-Scope (Version 1)
-- User registration (sign-up) form with validation
-- User login (sign-in) form with validation
-- Next.js API routes under `/api/auth/route.ts` handling:
-  - Credential validation
-  - Password hashing (e.g., bcrypt)
-  - Session creation or JWT issuance
-- Protected dashboard pages under `/dashboard`:
-  - `layout.tsx` wrapping dashboard content
-  - `page.tsx` rendering static data from `data.json`
-- Global application layout in `/app/layout.tsx`
-- Basic styling via `globals.css` and `dashboard/theme.css`
-- TypeScript strict mode enabled
+- Token-based user authentication endpoints (`/api/auth/sign-up`, `/api/auth/sign-in`) returning JSON Web Tokens (JWT).
+- Drizzle ORM schemas for `users`, `torrents`, and related tables (`files`, `categories`).
+- Core REST API routes under `app/api/`:
+  • `/api/torrents/search` (GET)  
+  • `/api/torrents/latest` (GET)  
+  • `/api/torrents/[id]` (GET)  
+  • `/api/users/me` (GET/PUT)
+- A secure ingest endpoint (`/api/ingest`) for Cloudflare Workers to push scraped torrent data.
+- Admin dashboard built with React, Tailwind CSS, and shadcn/ui to manage users and torrent records.
+- Development and production workflows via Docker for local parity, Vercel for serverless deployment.
+- Input validation with Zod in every API route.
 
 ### Out-of-Scope (Later Phases)
-- Integration with a real database (PostgreSQL, MongoDB, etc.)
-- Advanced authentication flows (password reset, email verification, MFA)
-- Role-based access control (RBAC)
-- Multi-tenant or white-label theming
-- Unit, integration, or end-to-end testing suites
-- CI/CD pipeline and production deployment scripts
-
----
+- Native peer-to-peer streaming logic (handled entirely by the Flutter client).
+- Real-time WebSocket or signaling server for peer discovery.
+- In-app video player or front-end Flutter UI components.
+- Advanced analytics, recommendation engine, or machine-learning features.
+- Multi-region deployments or data residency compliance beyond a single PostgreSQL instance.
 
 ## 3. User Flow
 
-A new visitor lands on the root URL and sees a welcome page with options to **Sign Up** or **Sign In**. If they choose Sign Up, they fill in their email, password, and hit “Create Account.” The form submits to `/api/auth/route.ts`, which hashes the password, creates a new user session or token, and redirects them to the dashboard. If any input is invalid, an inline error message explains the issue (e.g., “Password too short”).
+A new mobile user opens the Flutter torrent streaming app and lands on the welcome screen, where they choose to sign up or sign in. If signing up, they enter an email and password, which the Flutter client sends to the backend’s `/api/auth/sign-up` endpoint. Upon success, the backend returns a JWT token and user profile data. The Flutter app stores the token locally and automatically navigates to the home screen.
 
-Once authenticated, the user is taken to the `/dashboard` route. Here they see a sidebar or header defined by `dashboard/layout.tsx`, and the main panel pulls in static data from `data.json`. They can log out (if that control is present), but otherwise their entire session is managed by server-side cookies or tokens. Returning users go directly to Sign In, submit credentials, and upon success they land back on `/dashboard`. Any unauthorized access to `/dashboard` redirects back to Sign In.
+On the home screen, the user sees a search bar and a list of latest torrents fetched via `/api/torrents/latest`. When they type a query and hit search, the client sends a GET request to `/api/torrents/search?q=…` with the JWT in its `Authorization` header. The backend validates the token, queries the PostgreSQL database via Drizzle ORM, and returns a JSON array of torrent metadata. The user taps an item, the client fetches details from `/api/torrents/[id]`, and then passes the magnet link to the built-in P2P streamer in Flutter.
 
----
+Separately, an administrator opens the web dashboard, enters credentials at `/login`, and receives a JWT cookie. They view a table of users and content, use filters to find problematic entries, and can edit or delete records. The dashboard also shows basic system health metrics.
 
 ## 4. Core Features
 
-- **Sign-Up Page (`/app/sign-up/page.tsx`)**: Form fields for email & password, client-side validation, POST to `/api/auth`.
-- **Sign-In Page (`/app/sign-in/page.tsx`)**: Form fields for email & password, client-side validation, POST to `/api/auth`.
-- **Authentication API (`/app/api/auth/route.ts`)**: Handles both registration and login based on HTTP method, integrates password hashing (bcrypt) and session or JWT logic.
-- **Global Layout (`/app/layout.tsx` + `globals.css`)**: Shared header, footer, and CSS resets across all pages.
-- **Dashboard Layout (`/app/dashboard/layout.tsx` + `dashboard/theme.css`)**: Sidebar or top nav for authenticated flows, section-specific styling.
-- **Dashboard Page (`/app/dashboard/page.tsx`)**: Reads `data.json`, renders it as cards or tables.
-- **Static Data Source (`/app/dashboard/data.json`)**: Example dataset to demo dynamic rendering.
-- **TypeScript Configuration**: `tsconfig.json` with strict mode and path aliases (if any).
-
----
+- **Authentication Module**  
+  • Sign-up and sign-in endpoints issuing JWTs  
+  • Token validation middleware for protected routes
+- **User Profile Management**  
+  • `GET /api/users/me` to fetch profile  
+  • `PUT /api/users/me` to update preferences
+- **Torrent Metadata API**  
+  • `GET /api/torrents/search?q=` for search  
+  • `GET /api/torrents/latest` for newest entries  
+  • `GET /api/torrents/[id]` for details
+- **Data Ingestion Endpoint**  
+  • `POST /api/ingest` secured by API key for Cloudflare Worker to push scraped data
+- **Database Layer**  
+  • Drizzle ORM schemas for users, torrents, files, categories  
+  • Migration scripts via Drizzle Kit
+- **Admin Dashboard**  
+  • React + Tailwind CSS + shadcn/ui interface  
+  • User and content management tables  
+  • Basic monitoring widgets
+- **Validation & Error Handling**  
+  • Zod schemas for all request bodies and query params  
+  • Consistent JSON error format
+- **DevOps & Deployment**  
+  • Docker Compose for local Node.js and PostgreSQL setup  
+  • Vercel configuration for serverless functions
 
 ## 5. Tech Stack & Tools
 
-- **Framework**: Next.js (App Router) for file-based routing, SSR/SSG, and API routes.
-- **Language**: TypeScript for type safety.
-- **UI Library**: React 18 for component-based UI.
-- **Styling**: Plain CSS via `globals.css` (global reset) and `theme.css` (sectional styling). Can easily migrate to CSS Modules or Tailwind in the future.
-- **Backend**: Node.js runtime provided by Next.js API routes.
-- **Password Hashing**: bcrypt (npm package).
-- **Session/JWT**: NextAuth.js or custom JWT logic (to be decided in implementation).
-- **IDE & Dev Tools**: VS Code with ESLint, Prettier extensions. Optionally, Cursor.ai for AI-assisted coding.
-
----
+- **Backend Framework:** Next.js 15 with App Router (API routes)  
+- **Language:** TypeScript for end-to-end type safety  
+- **Authentication Library:** better-auth (extended for JWT)  
+- **Database:** PostgreSQL  
+- **ORM:** Drizzle ORM + Drizzle Kit for migrations  
+- **Validation:** Zod for input schemas  
+- **Web Dashboard:** React, Tailwind CSS, shadcn/ui  
+- **Containerization:** Docker & Docker Compose  
+- **Deployment:** Vercel (serverless functions)  
+- **External Integrations:** Cloudflare Worker for scraping, secured API key
 
 ## 6. Non-Functional Requirements
 
-- **Performance**: Initial page load under 200 ms on a standard broadband connection. API responses under 300 ms.
-- **Security**:
-  - HTTPS only in production.
-  - Proper CORS, CSRF protection for API routes.
-  - Secure password storage (bcrypt with salt).
-  - No credentials or secrets checked into version control.
-- **Scalability**: Structure must support adding database integration, caching layers, and advanced auth flows without rewiring core app.
-- **Usability**: Forms should give real-time feedback on invalid input. Layout must be responsive (mobile > 320 px).
-- **Maintainability**: Code must adhere to TypeScript strict mode. Linting & formatting enforced by ESLint/Prettier.
-
----
+- **Performance:** 95th percentile API response time under 200 ms for typical queries.  
+- **Scalability:** Auto-scaling on Vercel to handle spikes in traffic from mobile and web clients.  
+- **Security:** HTTPS-only endpoints, JWT tokens with 1-hour expiry, secure storage of secrets in environment variables, input validation to prevent injection attacks.  
+- **Reliability:** Zero-downtime deployments, automated health checks.  
+- **Usability:** Clear, consistent JSON API design; inline documentation in OpenAPI or similar; meaningful HTTP status codes and error messages.  
+- **Compliance:** GDPR-ready with user data deletion endpoint and clear privacy policy (to be drafted separately).
 
 ## 7. Constraints & Assumptions
 
-- **No Database**: Dashboard uses only `data.json`; real database integration is deferred.
-- **Node Version**: Requires Node.js >= 14.
-- **Next.js Version**: Built on Next.js 13+ App Router.
-- **Authentication**: Assumes availability of bcrypt or NextAuth.js at implementation time.
-- **Hosting**: Targets serverless or Node.js-capable hosting (e.g., Vercel, Netlify).
-- **Browser Support**: Modern evergreen browsers; no IE11 support required.
-
----
+- **Token-Based Auth Required:** We assume Flutter clients will handle JWT storage and refresh flows.  
+- **Cloudflare Worker Availability:** We assume the scraper runs independently and can reliably reach the `/api/ingest` endpoint.  
+- **Single Database Instance:** No multi-region failover in V1.  
+- **Network Connectivity:** Users need stable internet for API calls; offline mode is not supported initially.  
+- **Vercel Limits:** Serverless functions must stay under execution timeout (10s default) and memory limits (1GB).
 
 ## 8. Known Issues & Potential Pitfalls
 
-- **Static Data Limitation**: `data.json` is only for demo. A real API or database will be needed to avoid stale data.
-  *Mitigation*: Define a clear interface for data fetching so swapping to a live endpoint is trivial.
-
-- **Global CSS Conflicts**: Using global styles can lead to unintended overrides.
-  *Mitigation*: Plan to migrate to CSS Modules or utility-first CSS in Phase 2.
-
-- **API Route Ambiguity**: Single `/api/auth/route.ts` handling both sign-up and sign-in could get complex.
-  *Mitigation*: Clearly branch on HTTP method (`POST /register` vs. `POST /login`) or split into separate files.
-
-- **Lack of Testing**: No test suite means regressions can slip in.
-  *Mitigation*: Build a minimal Jest + React Testing Library setup in an early iteration.
-
-- **Error Handling Gaps**: Client and server must handle edge cases (network failures, malformed input).
-  *Mitigation*: Define a standard error response schema and show user-friendly messages.
+- **API Rate Limits:** Vercel free tier has execution and invocation limits. Mitigation: upgrade plan or add caching layer (e.g., Redis) later.  
+- **Database Migrations:** Drizzle Kit migrations must be coordinated across environments; avoid schema drift by running migrations in CI/CD.  
+- **Token Expiry & Refresh:** Without a refresh-token flow, users may be logged out every hour. Plan a refresh endpoint in the next phase.  
+- **CORS & Headers:** Must configure CORS on Next.js to allow requests from your Flutter app domain.  
+- **Large Payloads:** Searching or listing very large torrent sets can hit payload size limits. Paginate results and support `limit`/`offset` parameters.  
+- **Security of Ingest Endpoint:** Protect with a strong API key and rate limit to avoid unauthorized data injection.
 
 ---
 
-This PRD should serve as the single source of truth for the AI model or any developer generating the next set of technical documents: Tech Stack Doc, Frontend Guidelines, Backend Structure, App Flow, File Structure, and IDE Rules. It contains all functional and non-functional requirements with no ambiguity, enabling seamless downstream development.
+This PRD serves as the single source of truth for building, testing, and extending the backend service that will power your Flutter torrent streaming application. Every detail here should eliminate guesswork and enable follow-up technical documents to flow from a clear, shared understanding of the system’s goals and boundaries.
